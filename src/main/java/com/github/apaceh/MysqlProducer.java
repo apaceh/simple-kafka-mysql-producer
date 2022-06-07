@@ -10,7 +10,9 @@ import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.Serializable;
 import java.util.HashMap;
 import java.util.Map;
@@ -26,54 +28,56 @@ public class MysqlProducer {
     public static void main(String[] args) throws IOException {
         final Map<String, Long> tableMap = new HashMap<>();
 
-        String bootstrapServers = "172.18.46.11:9092,172.18.46.12:9092,172.18.46.13:9092";
-        BinaryLogClient client = new BinaryLogClient(
-                "172.18.46.14",
-                3306,
-                "kafka",
-                "P@ssw0rd"
-        );
+        try (InputStream propertiesFile = new FileInputStream("/home/alfi/config/users-producer.properties")) {
 
-        //create Producer properties
-        Properties properties = new Properties();
-        properties.setProperty(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        properties.setProperty(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
-        properties.setProperty(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+            BinaryLogClient client = new BinaryLogClient(
+                    "172.18.46.14",
+                    3306,
+                    "kafka",
+                    "P@ssw0rd"
+            );
 
-        // create the producer
-        KafkaProducer<String, String> producer = new KafkaProducer<>(properties);
+            //create Producer properties
+            Properties properties = new Properties();
+            properties.load(propertiesFile);
 
-        client.registerEventListener(event -> {
-            EventData data = event.getData();
+            // create the producer
+            KafkaProducer<String, String> producer = new KafkaProducer<>(properties);
 
-            if(data instanceof TableMapEventData) {
-                TableMapEventData tableData = (TableMapEventData)data;
-                tableMap.put(tableData.getTable(), tableData.getTableId());
-            } else if(data instanceof WriteRowsEventData) {
-                WriteRowsEventData eventData = (WriteRowsEventData)data;
-                if(eventData.getTableId() == tableMap.get(TABLE_NAME)) {
-                    for(Object[] user: eventData.getRows()) {
-                        pushData(producer, getUserJson(user));
+            client.registerEventListener(event -> {
+                EventData data = event.getData();
+
+                if(data instanceof TableMapEventData) {
+                    TableMapEventData tableData = (TableMapEventData)data;
+                    tableMap.put(tableData.getTable(), tableData.getTableId());
+                } else if(data instanceof WriteRowsEventData) {
+                    WriteRowsEventData eventData = (WriteRowsEventData)data;
+                    if(eventData.getTableId() == tableMap.get(TABLE_NAME)) {
+                        for(Object[] user: eventData.getRows()) {
+                            pushData(producer, getUserJson(user));
+                        }
                     }
-                }
-            } else if(data instanceof UpdateRowsEventData) {
-                UpdateRowsEventData eventData = (UpdateRowsEventData)data;
-                if(eventData.getTableId() == tableMap.get(TABLE_NAME)) {
-                    for(Map.Entry<Serializable[], Serializable[]> row : eventData.getRows()) {
-                        pushData(producer, getUserJson(row.getValue()));
+                } else if(data instanceof UpdateRowsEventData) {
+                    UpdateRowsEventData eventData = (UpdateRowsEventData)data;
+                    if(eventData.getTableId() == tableMap.get(TABLE_NAME)) {
+                        for(Map.Entry<Serializable[], Serializable[]> row : eventData.getRows()) {
+                            pushData(producer, getUserJson(row.getValue()));
+                        }
                     }
-                }
-            } else if(data instanceof DeleteRowsEventData) {
-                DeleteRowsEventData eventData = (DeleteRowsEventData)data;
+                } else if(data instanceof DeleteRowsEventData) {
+                    DeleteRowsEventData eventData = (DeleteRowsEventData)data;
                 /*if(eventData.getTableId() == tableMap.get(TABLE_NAME)) {
                     for(Object[] product: eventData.getRows()) {
                         pusher.trigger(PRODUCT_TABLE_NAME, "delete", product[0]);
                     }
                 }*/
-            }
-        });
+                }
+            });
 
-        client.connect();
+            client.connect();
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
     }
 
     static JSONObject getUserJson(Object[] user) {
